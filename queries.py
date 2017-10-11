@@ -3,54 +3,39 @@ Just a utility file to store some SQL queries for easy reference
 
 @author: Toby Murray
 '''
-createChangesetTable = '''CREATE EXTENSION IF NOT EXISTS hstore;
-  CREATE TABLE osm_changeset (
+createNoteTable = '''CREATE EXTENSION IF NOT EXISTS hstore;
+  CREATE TABLE note (
   id bigint,
-  user_id bigint,
   created_at timestamp without time zone,
-  min_lat numeric(10,7),
-  max_lat numeric(10,7),
-  min_lon numeric(10,7),
-  max_lon numeric(10,7),
-  closed_at timestamp without time zone,
-  open boolean,
-  num_changes integer,
-  user_name varchar(255),
-  tags hstore
+  closed_at timestamp without time zone,  
+  lat numeric(10,7),
+  lon numeric(10,7)
 );
-CREATE TABLE osm_changeset_comment (
-  comment_changeset_id bigint not null,
-  comment_user_id bigint not null,
-  comment_user_name varchar(255) not null,
+CREATE TABLE note_comment (
+  comment_note_id bigint not null,
+  comment_action text not null,
   comment_date timestamp without time zone not null,
-  comment_text text not null
-);
-CREATE TABLE osm_changeset_state (
-  last_sequence bigint,
-  last_timestamp timestamp without time zone,
-  update_in_progress smallint
+  comment_user_id bigint,
+  comment_user_name varchar(255),
+  comment_text text
 );
 '''
 
-initStateTable = '''INSERT INTO osm_changeset_state VALUES (-1, null, 0)''';
-
-dropIndexes = '''ALTER TABLE osm_changeset DROP CONSTRAINT IF EXISTS osm_changeset_pkey CASCADE;
-DROP INDEX IF EXISTS user_name_idx, user_id_idx, created_idx, tags_idx, changeset_geom_gist ;
+dropIndexes = '''ALTER TABLE note DROP CONSTRAINT IF EXISTS note_pkey CASCADE;
+DROP INDEX IF EXISTS created_idx, closed_idx, note_geom_gist ;
 '''
 
-createConstraints = '''ALTER TABLE osm_changeset ADD CONSTRAINT osm_changeset_pkey PRIMARY KEY(id);'''
+createConstraints = '''ALTER TABLE note ADD CONSTRAINT note_pkey PRIMARY KEY(id);'''
 
-createIndexes = '''CREATE INDEX user_name_idx ON osm_changeset(user_name);
-CREATE INDEX user_id_idx ON osm_changeset(user_id);
-CREATE INDEX created_idx ON osm_changeset(created_at);
-CREATE INDEX tags_idx ON osm_changeset USING GIN(tags);
+createIndexes = '''CREATE INDEX created_idx ON note(created_at);
+CREATE INDEX closed_idx ON note(closed_at);
 '''
 
 createGeometryColumn = '''
 CREATE EXTENSION IF NOT EXISTS postgis;
-SELECT AddGeometryColumn('osm_changeset','geom', 4326, 'POLYGON', 2);
+SELECT AddGeometryColumn('note','geom', 4326, 'POINT', 2);
 '''
 
 createGeomIndex = '''
-CREATE INDEX changeset_geom_gist ON osm_changeset USING GIST(geom);
+CREATE INDEX note_geom_gist ON note USING GIST(geom);
 '''

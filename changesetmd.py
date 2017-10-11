@@ -35,82 +35,62 @@ class ChangesetMD():
     def truncateTables(self, connection):
         print 'truncating tables'
         cursor = connection.cursor()
-        cursor.execute("TRUNCATE TABLE osm_changeset_comment CASCADE;")
-        cursor.execute("TRUNCATE TABLE osm_changeset CASCADE;")
+        cursor.execute("TRUNCATE TABLE note_comment CASCADE;")
+        cursor.execute("TRUNCATE TABLE note CASCADE;")
         cursor.execute(queries.dropIndexes)
-        cursor.execute("UPDATE osm_changeset_state set last_sequence = -1, last_timestamp = null, update_in_progress = 0")
         connection.commit()
 
     def createTables(self, connection):
         print 'creating tables'
         cursor = connection.cursor()
-        cursor.execute(queries.createChangesetTable)
-        cursor.execute(queries.initStateTable)
+        cursor.execute(queries.createNoteTable)
         if self.createGeometry:
             cursor.execute(queries.createGeometryColumn)
         connection.commit()
 
-    def insertNew(self, connection, id, userId, createdAt, minLat, maxLat, minLon, maxLon, closedAt, open, numChanges, userName, tags, comments):
+    def insertNew(self, connection, id, createdAt, closedAt, lat, lon, comments):
         cursor = connection.cursor()
-        if self.createGeometry:
-            cursor.execute('''INSERT into osm_changeset
-                    (id, user_id, created_at, min_lat, max_lat, min_lon, max_lon, closed_at, open, num_changes, user_name, tags, geom)
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,ST_SetSRID(ST_MakeEnvelope(%s,%s,%s,%s), 4326))''',
-                    (id, userId, createdAt, minLat, maxLat, minLon, maxLon, closedAt, open, numChanges, userName, tags, minLon, minLat, maxLon, maxLat))
+        if self.createGeometry:          
+            cursor.execute('''INSERT into note
+                    (id, created_at, closed_at, lon, lat, geom)
+                    values (%s,%s,%s,%s,%s,ST_SetSRID(ST_MakePoint(%s,%s), 4326))''',
+                    (id, createdAt, closedAt, lon, lat, lon, lat))
         else:
-            cursor.execute('''INSERT into osm_changeset
-                    (id, user_id, created_at, min_lat, max_lat, min_lon, max_lon, closed_at, open, num_changes, user_name, tags)
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                    (id, userId, createdAt, minLat, maxLat, minLon, maxLon, closedAt, open, numChanges, userName, tags))
-        for comment in comments:
-            cursor.execute('''INSERT into osm_changeset_comment
-                    (comment_changeset_id, comment_user_id, comment_user_name, comment_date, comment_text)
+            cursor.execute('''INSERT into note
+                    (id, created_at, closed_at, lon, lat)
                     values (%s,%s,%s,%s,%s)''',
-                    (id, comment['uid'], comment['user'], comment['date'], comment['text']))
+                    (id, createdAt, closedAt, lon, lat))
+        for comment in comments:
+            cursor.execute('''INSERT into note_comment
+                    (comment_note_id, comment_action, comment_date, comment_user_id, comment_user_name, comment_text)
+                    values (%s,%s,%s,%s,%s,%s)''',
+                    (id, comment['action'], comment['timestamp'], comment['uid'], comment['user'], comment['text']))
 
-    def deleteExisting(self, connection, id):
-        cursor = connection.cursor()
-        cursor.execute('''DELETE FROM osm_changeset_comment
-                          WHERE comment_changeset_id = %s''', (id,))
-        cursor.execute('''DELETE FROM osm_changeset
-                          WHERE id = %s''', (id,))
-
-    def parseFile(self, connection, changesetFile, doReplication):
+    def parseFile(self, connection, changesetFile):
         parsedCount = 0
         startTime = datetime.now()
         cursor = connection.cursor()
         context = etree.iterparse(changesetFile)
         action, root = context.next()
         for action, elem in context:
-            if(elem.tag != 'changeset'):
+            if(elem.tag != 'note'):
                 continue
 
             parsedCount += 1
 
-            tags = {}
-            for tag in elem.iterchildren(tag='tag'):
-                tags[tag.attrib['k']] = tag.attrib['v']
-
             comments = []
-            for discussion in elem.iterchildren(tag='discussion'):
-                for commentElement in discussion.iterchildren(tag='comment'):
-                    comment = dict()
-                    comment['uid'] = commentElement.attrib.get('uid')
-                    comment['user'] = commentElement.attrib.get('user')
-                    comment['date'] = commentElement.attrib.get('date')
-                    for text in commentElement.iterchildren(tag='text'):
-                        comment['text'] = text.text
-                    comments.append(comment)
+            for commentElement in elem.iterchildren(tag='comment'):
+                comment = dict()
+                comment['action'] = commentElement.attrib.get('action')
+                comment['timestamp'] = commentElement.attrib.get('timestamp')               
+                comment['uid'] = commentElement.attrib.get('uid', None)
+                comment['user'] = commentElement.attrib.get('user', None)
+                comment['text'] = commentElement.text
+                comments.append(comment)
 
-            if(doReplication):
-                self.deleteExisting(connection, elem.attrib['id'])
 
-            self.insertNew(connection, elem.attrib['id'], elem.attrib.get('uid', None),
-                           elem.attrib['created_at'], elem.attrib.get('min_lat', None),
-                           elem.attrib.get('max_lat', None), elem.attrib.get('min_lon', None),
-                           elem.attrib.get('max_lon', None),elem.attrib.get('closed_at', None),
-                           elem.attrib.get('open', None), elem.attrib.get('num_changes', None),
-                           elem.attrib.get('user', None), tags, comments)
+            self.insertNew(connection, elem.attrib['id'], elem.attrib['created_at'], elem.attrib.get('closed_at', None),
+                           elem.attrib['lat'], elem.attrib['lon'], comments)
 
             if((parsedCount % 10000) == 0):
                 print "parsed %s" % ('{:,}'.format(parsedCount))
@@ -124,75 +104,6 @@ class ChangesetMD():
         print "parsing complete"
         print "parsed {:,}".format(parsedCount)
 
-    def fetchReplicationFile(self, sequenceNumber):
-        topdir = format(sequenceNumber / 1000000, '003')
-        subdir = format((sequenceNumber / 1000) % 1000, '003')
-        fileNumber = format(sequenceNumber % 1000, '003')
-        fileUrl = BASE_REPL_URL + topdir + '/' + subdir + '/' + fileNumber + '.osm.gz'
-        print "opening replication file at " + fileUrl
-        replicationFile = urllib2.urlopen(fileUrl)
-        replicationData = StringIO(replicationFile.read())
-        return gzip.GzipFile(fileobj=replicationData)
-
-    def doReplication(self, connection):
-        cursor = connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        try:
-            cursor.execute('LOCK TABLE osm_changeset_state IN ACCESS EXCLUSIVE MODE NOWAIT')
-        except psycopg2.OperationalError as e:
-            print "error getting lock on state table. Another process might be running"
-            return 1
-        cursor.execute('select * from osm_changeset_state')
-        dbStatus = cursor.fetchone()
-        lastDbSequence = dbStatus['last_sequence']
-        timestamp = None
-        lastServerTimestamp = None
-        newTimestamp = None
-        if(dbStatus['last_timestamp'] is not None):
-            timestamp = dbStatus['last_timestamp']
-        print "latest timestamp in database: " + str(timestamp)
-        if(dbStatus['update_in_progress'] == 1):
-            print "concurrent update in progress. Bailing out!"
-            return 1
-        if(lastDbSequence == -1):
-            print "replication state not initialized. You must set the sequence number first."
-            return 1
-        cursor.execute('update osm_changeset_state set update_in_progress = 1')
-        connection.commit()
-        print("latest sequence from the database: " + str(lastDbSequence))
-
-        #No matter what happens after this point, execution needs to reach the update statement
-        #at the end of this method to unlock the database or an error will forever leave it locked
-        returnStatus = 0
-        try:
-            serverState = yaml.load(urllib2.urlopen(BASE_REPL_URL + "state.yaml"))
-            lastServerSequence = serverState['sequence']
-            print "got sequence"
-            lastServerTimestamp = serverState['last_run']
-            print "last timestamp on server: " + str(lastServerTimestamp)
-        except Exception as e:
-            print "error retrieving server state file. Bailing on replication"
-            print e
-            returnStatus = 2
-        else:
-            try:
-                print("latest sequence on OSM server: " + str(lastServerSequence))
-                if(lastServerSequence > lastDbSequence):
-                    print("server has new sequence. commencing replication")
-                    currentSequence = lastDbSequence + 1
-                    while(currentSequence <= lastServerSequence):
-                        self.parseFile(connection, self.fetchReplicationFile(currentSequence), True)
-                        cursor.execute('update osm_changeset_state set last_sequence = %s', (currentSequence,))
-                        connection.commit()
-                        currentSequence += 1
-                    timestamp = lastServerTimestamp
-                print("finished with replication. Clearing status record")
-            except Exception as e:
-                print "error during replication"
-                print e
-                returnStatus = 2
-        cursor.execute('update osm_changeset_state set update_in_progress = 0, last_timestamp = %s', (timestamp,))
-        connection.commit()
-        return returnStatus
 
 if __name__ == '__main__':
     beginTime = datetime.now()
@@ -208,7 +119,6 @@ if __name__ == '__main__':
     argParser.add_argument('-p', '--password', action='store', dest='dbPass', default=None, help='Database password')
     argParser.add_argument('-d', '--database', action='store', dest='dbName', help='Target database', required=True)
     argParser.add_argument('-f', '--file', action='store', dest='fileName', help='OSM changeset file to parse')
-    argParser.add_argument('-r', '--replicate', action='store_true', dest='doReplication', default=False, help='Apply a replication file to an existing database')
     argParser.add_argument('-g', '--geometry', action='store_true', dest='createGeometry', default=False, help='Build geometry of changesets (requires postgis)')
 
     args = argParser.parse_args()
@@ -225,9 +135,6 @@ if __name__ == '__main__':
 
     psycopg2.extras.register_hstore(conn)
 
-    if(args.doReplication):
-        returnStatus = md.doReplication(conn)
-        sys.exit(returnStatus)
 
     if not (args.fileName is None):
         if args.createGeometry:
@@ -235,33 +142,29 @@ if __name__ == '__main__':
         else:
             print 'parsing changeset file'
         changesetFile = None
-        if(args.doReplication):
-            changesetFile = gzip.open(args.fileName, 'rb')
-        else:
-            if(args.fileName[-4:] == '.bz2'):
-                if(bz2Support):
-                    changesetFile = BZ2File(args.fileName)
-                else:
-                    print 'ERROR: bzip2 support not available. Unzip file first or install bz2file'
-                    sys.exit(1)
+        if(args.fileName[-4:] == '.bz2'):
+            if(bz2Support):
+                changesetFile = BZ2File(args.fileName)
             else:
-                changesetFile = open(args.fileName, 'rb')
+                print 'ERROR: bzip2 support not available. Unzip file first or install bz2file'
+                sys.exit(1)
+        else:
+            changesetFile = open(args.fileName, 'rb')
 
         if(changesetFile != None):
-            md.parseFile(conn, changesetFile, args.doReplication)
+            md.parseFile(conn, changesetFile)
         else:
             print 'ERROR: no changeset file opened. Something went wrong in processing args'
             sys.exist(1)
 
-        if(not args.doReplication):
-            cursor = conn.cursor()
-            print 'creating constraints'
-            cursor.execute(queries.createConstraints)
-            print 'creating indexes'
-            cursor.execute(queries.createIndexes)
-            if args.createGeometry:
-                cursor.execute(queries.createGeomIndex)
-            conn.commit()
+        cursor = conn.cursor()
+        print 'creating constraints'
+        cursor.execute(queries.createConstraints)
+        print 'creating indexes'
+        cursor.execute(queries.createIndexes)
+        if args.createGeometry:
+            cursor.execute(queries.createGeomIndex)
+        conn.commit()
 
         conn.close()
 
