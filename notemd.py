@@ -1,9 +1,9 @@
 #!/usr/bin/python
 '''
-ChangesetMD is a simple XML parser to read the weekly changeset metadata dumps
+NoteMD is a simple XML parser to read the daily note dumps
 from OpenStreetmap into a postgres database for querying.
 
-@author: Toby Murray
+@author: Michal Brzozowski, Toby Murray
 '''
 
 import os
@@ -26,9 +26,7 @@ try:
 except ImportError:
     bz2Support = False
 
-BASE_REPL_URL = "http://planet.openstreetmap.org/replication/changesets/"
-
-class ChangesetMD():
+class NoteMD():
     def __init__(self, createGeometry):
         self.createGeometry = createGeometry
 
@@ -66,11 +64,11 @@ class ChangesetMD():
                     values (%s,%s,%s,%s,%s,%s)''',
                     (id, comment['action'], comment['timestamp'], comment['uid'], comment['user'], comment['text']))
 
-    def parseFile(self, connection, changesetFile):
+    def parseFile(self, connection, noteFile):
         parsedCount = 0
         startTime = datetime.now()
         cursor = connection.cursor()
-        context = etree.iterparse(changesetFile)
+        context = etree.iterparse(noteFile)
         action, root = context.next()
         for action, elem in context:
             if(elem.tag != 'note'):
@@ -110,7 +108,7 @@ if __name__ == '__main__':
     endTime = None
     timeCost = None
 
-    argParser = argparse.ArgumentParser(description="Parse OSM Changeset metadata into a database")
+    argParser = argparse.ArgumentParser(description="Parse OSM note metadata into a database")
     argParser.add_argument('-t', '--trunc', action='store_true', default=False, dest='truncateTables', help='Truncate existing tables (also drops indexes)')
     argParser.add_argument('-c', '--create', action='store_true', default=False, dest='createTables', help='Create tables')
     argParser.add_argument('-H', '--host', action='store', dest='dbHost', help='Database hostname')
@@ -118,15 +116,15 @@ if __name__ == '__main__':
     argParser.add_argument('-u', '--user', action='store', dest='dbUser', default=None, help='Database username')
     argParser.add_argument('-p', '--password', action='store', dest='dbPass', default=None, help='Database password')
     argParser.add_argument('-d', '--database', action='store', dest='dbName', help='Target database', required=True)
-    argParser.add_argument('-f', '--file', action='store', dest='fileName', help='OSM changeset file to parse')
-    argParser.add_argument('-g', '--geometry', action='store_true', dest='createGeometry', default=False, help='Build geometry of changesets (requires postgis)')
+    argParser.add_argument('-f', '--file', action='store', dest='fileName', help='OSM notes file to parse')
+    argParser.add_argument('-g', '--geometry', action='store_true', dest='createGeometry', default=False, help='Build geometry of notes (requires postgis)')
 
     args = argParser.parse_args()
 
     conn = psycopg2.connect(database=args.dbName, user=args.dbUser, password=args.dbPass, host=args.dbHost, port=args.dbPort)
 
 
-    md = ChangesetMD(args.createGeometry)
+    md = NoteMD(args.createGeometry)
     if args.truncateTables:
         md.truncateTables(conn)
 
@@ -138,23 +136,23 @@ if __name__ == '__main__':
 
     if not (args.fileName is None):
         if args.createGeometry:
-            print 'parsing changeset file with geometries'
+            print 'parsing note file with geometries'
         else:
-            print 'parsing changeset file'
-        changesetFile = None
+            print 'parsing note file'
+        noteFile = None
         if(args.fileName[-4:] == '.bz2'):
             if(bz2Support):
-                changesetFile = BZ2File(args.fileName)
+                noteFile = BZ2File(args.fileName)
             else:
                 print 'ERROR: bzip2 support not available. Unzip file first or install bz2file'
                 sys.exit(1)
         else:
-            changesetFile = open(args.fileName, 'rb')
+            noteFile = open(args.fileName, 'rb')
 
-        if(changesetFile != None):
-            md.parseFile(conn, changesetFile)
+        if(noteFile != None):
+            md.parseFile(conn, noteFile)
         else:
-            print 'ERROR: no changeset file opened. Something went wrong in processing args'
+            print 'ERROR: no note file opened. Something went wrong in processing args'
             sys.exist(1)
 
         cursor = conn.cursor()
@@ -173,4 +171,4 @@ if __name__ == '__main__':
 
     print 'Processing time cost is ', timeCost
 
-    print 'All done. Enjoy your (meta)data!'
+    print 'All done. Enjoy your notes!'

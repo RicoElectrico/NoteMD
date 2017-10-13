@@ -1,15 +1,14 @@
 '''
 Just a utility file to store some SQL queries for easy reference
 
-@author: Toby Murray
+@author: Michal Brzozowski, Toby Murray
 '''
-createNoteTable = '''CREATE EXTENSION IF NOT EXISTS hstore;
-  CREATE TABLE note (
-  id bigint,
-  created_at timestamp without time zone,
+createNoteTable = '''CREATE TABLE note (
+  id bigint not null,
+  created_at timestamp without time zone not null,
   closed_at timestamp without time zone,  
-  lat numeric(10,7),
-  lon numeric(10,7)
+  lat numeric(10,7) not null,
+  lon numeric(10,7) not null
 );
 CREATE TABLE note_comment (
   comment_note_id bigint not null,
@@ -27,8 +26,9 @@ DROP INDEX IF EXISTS created_idx, closed_idx, note_geom_gist ;
 
 createConstraints = '''ALTER TABLE note ADD CONSTRAINT note_pkey PRIMARY KEY(id);'''
 
-createIndexes = '''CREATE INDEX created_idx ON note(created_at);
-CREATE INDEX closed_idx ON note(closed_at);
+createIndexes = '''CREATE INDEX note_created_idx ON note(created_at);
+CREATE INDEX note_closed_idx ON note(closed_at);
+CREATE INDEX note_comment_id_idx ON note_comment(comment_note_id);
 '''
 
 createGeometryColumn = '''
