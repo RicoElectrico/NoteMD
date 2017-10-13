@@ -65,7 +65,7 @@ Primary table of all notes with the following columns:
 - `id`: note ID
 - `created_at/closed_at`: create/closed time. `closed_at` is NULL for notes that are open. 
 - `lat/lon` note coordinates in decimal degrees
-- `geom`: [optional] a postgis geometry column of `Polygon` type (SRID: 4326)
+- `geom`: [optional] a postgis geometry column of `Point` type (SRID: 4326)
 
 Only closed\_at can be null.
 
