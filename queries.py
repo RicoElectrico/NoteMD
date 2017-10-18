@@ -21,7 +21,7 @@ CREATE TABLE note_comment (
 '''
 
 dropIndexes = '''ALTER TABLE note DROP CONSTRAINT IF EXISTS note_pkey CASCADE;
-DROP INDEX IF EXISTS created_idx, closed_idx, note_geom_gist ;
+DROP INDEX IF EXISTS note_created_idx, note_closed_idx, note_comment_id_idx, note_geom_gist ;
 '''
 
 createConstraints = '''ALTER TABLE note ADD CONSTRAINT note_pkey PRIMARY KEY(id);'''
